@@ -117,27 +117,40 @@ const loginUser = asyncHandler(async (req, res) => {
     const loggedInUser = await User.findById(user._id).select(
       "-password -passwordResetToken -passwordResetExpires",
     );
-    res.status(200).json(
-      new ApiResponse(200, {
-        message: "User Logged In Successfully",
-        user: loggedInUser,
-      }),
-    );
+
+    const options = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+    };
+
+    res
+      .cookie("refreshToken", refreshTokens, options)
+      .cookie("accessToken", accessTokens, options)
+      .status(200)
+      .json(
+        new ApiResponse(200, {
+          message: "User Logged In Successfully",
+          user: loggedInUser,
+        }),
+      );
   } catch (error) {
     console.error("Error in loginUser:", error);
+    return res
+    .status(error.statusCode || 500)
+    .json(new ApiResponse(500 , null,"email or password is incorrect"));
   }
 });
 
-const logoutuser = asyncHandler(async (req, res) => {
+const logoutUser = asyncHandler(async (req, res) => {
   await User.findByIdAndUpdate(
     req.user._id,
     {
       $set: {
-        refreshTokens: [],
+        refreshTokens: null,
       },
     },
     {
-      new: true,
+      returnDocument: "after",
     },
   );
 
@@ -148,8 +161,125 @@ const logoutuser = asyncHandler(async (req, res) => {
 
   res
     .status(200)
+    .cookie("accessToken", options)
     .cookie("refreshToken", options)
     .json(new ApiResponse(200, "User Logged Out Successfully"));
 });
 
-export { registerUser, loginUser , logoutuser };
+const getCurrentUser = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id).select(
+    "-password -passwordResetToken -passwordResetExpires",
+  );
+
+  const data = {
+    name: user.name,
+    email: user.email,
+  };
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, data, "Current User Fetched Successfully"));
+});
+
+const updateDetails = asyncHandler(async (req, res) => {
+  const { email, name } = req.body;
+
+  if (!email || !name) {
+    throw new ApiError(400, "Atleast one field is required to update details");
+  }
+
+  const updatedUser = await User.findByIdAndUpdate(
+    req.user._id,
+    {
+      $set: {
+        name,
+        email,
+      },
+    },
+    {
+      new: true,
+    },
+  ).select("-password -passwordResetToken -passwordResetExpires");
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, updatedUser, "User details updated succesfully"),
+    );
+});
+
+const updateProfilePhoto = asyncHandler(async (req, res) => {
+  const profilePhotoLocalPath = req.file?.path;
+  if (!profilePhotoLocalPath) {
+    throw new ApiError(400, "Profile Photo is required");
+  }
+
+  const profilePhoto = await uploadOnCloudinary(profilePhotoLocalPath);
+
+  if (!profilePhoto?.url) {
+    throw new ApiError(500, "Cloudinary did not return a valid URL");
+  }
+
+  const updatedUser = await User.findByIdAndUpdate(
+    req.user._id,
+    {
+      $set: {
+        profilePhoto: profilePhoto.url,
+      },
+    },
+    {
+      returnDocument: "after",
+    },
+  ).select("-password -passwordResetToken -passwordResetExpires");
+
+  if (!updatedUser) {
+    throw new ApiError(500, "Unable to update profile photo");
+  }
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, updatedUser, "Profile Photo Updated Successfully"),
+    );
+});
+
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { email, oldPassword, newPassword } = req.body;
+  if (!email || !oldPassword || !newPassword) {
+    throw new ApiError(400, "feilds is required");
+  }
+
+  const user = await User.findOne({ email });
+
+  if (!user) {
+    throw new ApiError(400, "User with this email does not exist");
+  }
+  const isPasswordValid = await user.isPasswordValid(oldPassword);
+
+  if (!isPasswordValid) {
+    throw new ApiError(400, "Old password is incorrect");
+  }
+
+  user.password = newPassword;
+  await user.save({ validateBeforeSave: false });
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        null,
+        "Password reset successfully. You can now log in with your new password.",
+      ),
+    );
+});
+
+export {
+  registerUser,
+  loginUser,
+  logoutUser,
+  getCurrentUser,
+  updateDetails,
+  updateProfilePhoto,
+  forgotPassword,
+};
