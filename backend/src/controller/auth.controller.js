@@ -174,6 +174,7 @@ const getCurrentUser = asyncHandler(async (req, res) => {
   const data = {
     name: user.name,
     email: user.email,
+    profilePhoto :user.profilePhoto 
   };
 
   return res
@@ -273,6 +274,10 @@ const forgotPassword = asyncHandler(async (req, res) => {
       ),
     );
 });
+
+
+
+
 
 export {
   registerUser,

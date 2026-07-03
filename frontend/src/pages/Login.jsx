@@ -1,120 +1,150 @@
 import { useState } from "react";
 import API from "../api/axios";
 import { useNavigate } from "react-router-dom";
+import { LogIn, Mail, Lock, Loader2, AlertCircle } from "lucide-react";
+
+import logo from "../assets/logo.jpg";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (loading) return;
+    setLoading(true);
+    setMessage("");
+
     try {
       const res = await API.post("/users/login", { email, password });
-      setMessage(res.data.message);
 
-      // Redirect to dashboard after successful login
-      navigate("/dashboard");
+      const token = res.data.data.user.refreshTokens;
+      localStorage.setItem("token", token);
+      console.log("Stored Token:", token);
+
+      setMessage(res.data.message);
+      navigate("/");
     } catch (err) {
       setMessage(err.response?.data?.message || "Login failed");
     }
+
+    setLoading(false);
   };
 
   return (
-    <div className="flex min-h-screen flex-col justify-center px-6 py-12 lg:px-8 bg-gray-900">
-      <div className="sm:mx-auto sm:w-full sm:max-w-sm">
-        <img
-          src="https://tailwindcss.com/plus-assets/img/logos/mark.svg?color=indigo&shade=500"
-          alt="Logo"
-          className="mx-auto h-10 w-auto"
-        />
-        <h2 className="mt-10 text-center text-2xl font-bold tracking-tight text-white">
-          Sign in to your account
-        </h2>
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
+      {/* Decorative background elements aligned with new blue theme */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -top-40 -right-40 h-96 w-96 rounded-full bg-blue-600/5 blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 h-96 w-96 rounded-full bg-blue-600/5 blur-3xl" />
       </div>
 
-      <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-sm">
-        {message && (
-          <p className="mb-4 text-center text-red-400 font-semibold">{message}</p>
-        )}
+      <div className="relative z-10 w-full max-w-md">
+        {/* Header */}
+        <div className="mb-8 text-center">
+  {/* The container is wider now (w-auto px-4) to fit normal logos */}
+  <div className="mx-auto mb-4 flex h-12 w-fit items-center justify-center rounded-xl bg-blue-50/80 border border-blue-100 px-4 dark:bg-blue-950/30 dark:border-blue-900/50 shadow-sm">
+    <img
+      alt="Your Company"
+      src={logo}
+      className="h-6 w-auto object-contain rendering-crisp" 
+    />
+  </div>
+  <h1 className="text-2xl font-bold tracking-tight text-foreground">
+    Welcome back
+  </h1>
+  <p className="mt-2 text-sm text-muted-foreground">
+    Sign in to your account to continue
+  </p>
+</div>
 
-        <form onSubmit={handleLogin} className="space-y-6">
-          {/* Email Field */}
-          <div>
-            <label
-              htmlFor="email"
-              className="block text-sm font-medium text-gray-100"
-            >
-              Email address
-            </label>
-            <div className="mt-2">
-              <input
-                id="email"
-                name="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoComplete="email"
-                placeholder="Enter your email"
-                className="block w-full rounded-md bg-white/5 px-3 py-2 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:text-sm"
-              />
+        {/* Card */}
+        <div className="rounded-2xl border border-border bg-card p-8 shadow-2xl shadow-blue-600/[0.02]">
+          {/* Message */}
+          {message && (
+            <div className="mb-6 flex items-center gap-2 rounded-lg bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              {message}
             </div>
-          </div>
+          )}
 
-          {/* Password Field */}
-          <div>
-            <div className="flex items-center justify-between">
-              <label
-                htmlFor="password"
-                className="block text-sm font-medium text-gray-100"
-              >
-                Password
+          <form onSubmit={handleLogin} className="space-y-5">
+            {/* Email */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">
+                Email address
               </label>
-              <div className="text-sm">
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  placeholder="Enter your email"
+                  className="h-11 w-full rounded-lg border border-border bg-input pl-10 pr-3 text-sm text-foreground placeholder:text-muted-foreground outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+            </div>
+
+            {/* Password */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-foreground">
+                  Password
+                </label>
                 <a
                   href="#"
-                  className="font-semibold text-indigo-400 hover:text-indigo-300"
+                  className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
                 >
                   Forgot password?
                 </a>
               </div>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  placeholder="Enter your password"
+                  className="h-11 w-full rounded-lg border border-border bg-input pl-10 pr-3 text-sm text-foreground placeholder:text-muted-foreground outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
             </div>
-            <div className="mt-2">
-              <input
-                id="password"
-                name="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                autoComplete="current-password"
-                placeholder="Enter your password"
-                className="block w-full rounded-md bg-white/5 px-3 py-2 text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:text-sm"
-              />
-            </div>
-          </div>
 
-          <div>
+            {/* Submit Button */}
             <button
               type="submit"
-              className="flex w-full justify-center rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              disabled={loading}
+              className="relative flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-sm font-medium text-white shadow-sm shadow-blue-600/20 transition-all duration-200 hover:bg-blue-700 hover:shadow-md hover:shadow-blue-600/30 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
             >
-              Sign in
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin stroke-[2.5]" />
+                  <span>Signing in...</span>
+                </>
+              ) : (
+                "Sign in"
+              )}
             </button>
-          </div>
-        </form>
+          </form>
 
-        <p className="mt-10 text-center text-sm text-gray-400">
-          Not a member?{" "}
-          <span
-            onClick={() => navigate("/register")}
-            className="font-semibold text-indigo-400 hover:text-indigo-300 cursor-pointer"
-          >
-            Register now
-          </span>
-        </p>
+          <div className="mt-6 text-center text-sm text-muted-foreground">
+            Not a member?{" "}
+            <span
+              onClick={() => navigate("/register")}
+              className="cursor-pointer font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+            >
+              Register now
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -8,9 +8,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: [true, "Name is required"],
       trim: true,
-      minlength: [2, "Name must be atleast 2 characters long"],
+      minlength: [2, "Name must be at least 2 characters long"],
       maxlength: [50, "Name cannot exceed 50 characters"],
     },
+
     email: {
       type: String,
       required: [true, "Email is required"],
@@ -18,19 +19,22 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+
     password: {
       type: String,
       required: true,
-
-      minlength: [6, "password must be atleast 6 characters long"],
+      minlength: [6, "Password must be at least 6 characters long"],
     },
+
     profilePhoto: {
       type: String,
     },
+
     isActive: {
       type: Boolean,
       default: true,
     },
+
     passwordResetToken: {
       type: String,
     },
@@ -38,15 +42,25 @@ const userSchema = new mongoose.Schema(
     passwordResetExpires: {
       type: Date,
     },
-    refreshTokens : {
-      type : String
-    }
+
+    refreshTokens: {
+      type: String,
+    },
+
+    // NEW FIELD
+    friends: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 userSchema.pre("save", async function () {
   if (!this.isModified("password")) return;
+
   this.password = await bcrypt.hash(this.password, 10);
 });
 
@@ -64,7 +78,7 @@ userSchema.methods.generateAccessTokens = function () {
     process.env.ACCESS_TOKEN_SECRET,
     {
       expiresIn: process.env.ACCESS_TOKEN_EXPIRY,
-    },
+    }
   );
 };
 
@@ -76,7 +90,7 @@ userSchema.methods.generateRefreshTokens = function () {
     process.env.REFRESH_TOKEN_SECRET,
     {
       expiresIn: process.env.REFRESH_TOKEN_EXPIRY,
-    },
+    }
   );
 };
 
