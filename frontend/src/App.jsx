@@ -11,6 +11,8 @@ import Register from "./pages/Register";
 import ProtectedRoute from "./components/ProtectedRoutes";
 import Friends from "./pages/Friends";
 import Profile from "./pages/Profile";
+import Groups from "./pages/Groups";
+import GroupDetails from "./pages/GroupDetails";
 
 function App() {
   return (
@@ -36,6 +38,24 @@ function App() {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/groups"
+          element={
+            <ProtectedRoute>
+              <Groups />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/groups/:groupId"
+          element={
+            <ProtectedRoute>
+              <GroupDetails />
             </ProtectedRoute>
           }
         />

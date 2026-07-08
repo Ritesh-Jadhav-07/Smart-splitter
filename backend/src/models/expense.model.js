@@ -1,4 +1,8 @@
 import mongoose from "mongoose";
+import {
+  SPLIT_TYPES,
+  EXPENSE_CATEGORIES,
+} from "../constants/expense.constants.js";
 
 const payerSchema = new mongoose.Schema(
   {
@@ -14,7 +18,9 @@ const payerSchema = new mongoose.Schema(
       min: 0,
     },
   },
-  { _id: false }
+  {
+    _id: false,
+  }
 );
 
 const participantSchema = new mongoose.Schema(
@@ -25,14 +31,12 @@ const participantSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Amount this participant owes
     share: {
       type: Number,
       default: 0,
       min: 0,
     },
 
-    // Used only when splitType = PERCENTAGE
     percentage: {
       type: Number,
       default: 0,
@@ -40,7 +44,9 @@ const participantSchema = new mongoose.Schema(
       max: 100,
     },
   },
-  { _id: false }
+  {
+    _id: false,
+  }
 );
 
 const expenseSchema = new mongoose.Schema(
@@ -65,15 +71,14 @@ const expenseSchema = new mongoose.Schema(
 
     splitType: {
       type: String,
-      enum: ["EQUAL", "EXACT", "PERCENTAGE"],
+      enum: Object.values(SPLIT_TYPES),
       required: true,
     },
 
-    // null means one-to-one expense
     group: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Group",
-      default: null,
+      required: true,
     },
 
     paidBy: {
@@ -87,19 +92,27 @@ const expenseSchema = new mongoose.Schema(
     participants: {
       type: [participantSchema],
       validate: {
-        validator: (value) => value.length > 0,
-        message: "At least one participant is required.",
+        validator: (value) => value.length >= 2,
+        message: "At least two participants are required.",
       },
     },
 
     category: {
       type: String,
+      enum: EXPENSE_CATEGORIES,
       default: "Other",
+    },
+
+    currency: {
+      type: String,
+      default: "INR",
+      uppercase: true,
     },
 
     notes: {
       type: String,
       default: "",
+      trim: true,
     },
 
     createdBy: {
@@ -123,4 +136,23 @@ const expenseSchema = new mongoose.Schema(
   }
 );
 
-export const Expense = mongoose.model("Expense", expenseSchema);
+/*
+|--------------------------------------------------------------------------
+| Indexes
+|--------------------------------------------------------------------------
+*/
+
+expenseSchema.index({ group: 1 });
+
+expenseSchema.index({ createdBy: 1 });
+
+expenseSchema.index({ expenseDate: -1 });
+
+expenseSchema.index({ "participants.user": 1 });
+
+expenseSchema.index({ "paidBy.user": 1 });
+
+export const Expense = mongoose.model(
+  "Expense",
+  expenseSchema
+);

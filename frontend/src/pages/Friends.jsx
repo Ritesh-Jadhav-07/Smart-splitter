@@ -1,279 +1,448 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Users, UserCheck, UserPlus, Inbox, Search, Mail, Loader2 } from "lucide-react";
 import API from "../api/axios";
-import { loadSmartSplitterStore, newId, saveSmartSplitterStore } from "../utils/smartSplitterStore";
+
+// Import reusable components
+import Navbar from "../components/Navbar";
+import SearchBar from "../components/SearchBar";
+import FriendCard from "../components/FriendCard";
+import PendingRequestCard from "../components/PendingRequestCard";
+import EmptyState from "../components/EmptyState";
+import LoadingSkeleton from "../components/LoadingSkeleton";
+import Toast from "../components/Toast";
+import ConfirmationModal from "../components/ConfirmationModal";
 
 export default function Friends() {
-  const navigate = useNavigate();
-  const [user, setUser] = useState(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  // Friends & Requests lists
+  const [friends, setFriends] = useState([]);
+  const [requests, setRequests] = useState([]);
+  const [friendsLoading, setFriendsLoading] = useState(true);
+  const [requestsLoading, setRequestsLoading] = useState(true);
 
-  const [store, setStore] = useState(() => loadSmartSplitterStore());
-  const [friendName, setFriendName] = useState("");
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [sentRequestIds, setSentRequestIds] = useState([]);
+  const [searchInitiated, setSearchInitiated] = useState(false);
 
-  useEffect(() => {
-    // Keep in sync when other tabs update localStorage.
-    const onStorage = () => setStore(loadSmartSplitterStore());
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  // Actions loading state
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const fetchUser = async () => {
+  // Notifications
+  const [toasts, setToasts] = useState([]);
+
+  // Confirmation Modal
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {},
+    onCancel: () => {},
+    confirmText: "Confirm",
+    type: "danger",
+  });
+
+  // Fetch friends list
+  const fetchFriends = async () => {
+    setFriendsLoading(true);
     try {
-      const res = await API.get("/users/current-user");
-      setUser(res.data.data);
+      const res = await API.get("/friends/friends");
+      setFriends(res.data.data || []);
     } catch (err) {
-      console.log(err);
+      console.error(err);
+      addToast("Failed to fetch friends list.", "error");
+    } finally {
+      setFriendsLoading(false);
+    }
+  };
+
+  // Fetch pending requests
+  const fetchRequests = async () => {
+    setRequestsLoading(true);
+    try {
+      const res = await API.get("/friends/requests");
+      setRequests(res.data.data || []);
+    } catch (err) {
+      console.error(err);
+      addToast("Failed to fetch pending requests.", "error");
+    } finally {
+      setRequestsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchUser();
+    fetchFriends();
+    fetchRequests();
   }, []);
 
-  const initials = user?.name
-    ? user.name
-        .split(" ")
-        .map((n) => n[0])
-        .join("")
-        .toUpperCase()
-        .slice(0, 2)
-    : "U";
-
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    API.post("/users/logout").catch(() => {});
-    navigate("/login");
+  // Toast helpers
+  const addToast = (message, type = "success") => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts((prev) => [...prev, { id, message, type }]);
   };
 
-  const derivedFriendsFromGroups = useMemo(() => {
-    if (!store.groups.length) return [];
-    const selfKey = user?.email || user?.name || "";
-    const names = new Set();
+  const removeToast = (id) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
 
-    store.groups.forEach((g) => {
-      (g.members || []).forEach((m) => {
-        const key = m.id || m.name;
-        if (!key) return;
-        // Hide the current user from the derived list.
-        if (selfKey && (m.id === selfKey || m.name === selfKey)) return;
-        // Heuristic: if current user key matches member id/name, skip.
-        if (!selfKey && user?.name && m.name === user.name) return;
-        names.add(`${m.name}`);
-      });
+  // Search User by Email
+  const handleSearch = async (email) => {
+    if (!email.trim()) return;
+    setSearchLoading(true);
+    setSearchInitiated(true);
+    setSearchResults(null);
+    try {
+      const res = await API.get(`/friends/search?email=${encodeURIComponent(email.trim())}`);
+      setSearchResults(res.data.data);
+    } catch (err) {
+      const errMsg = err.response?.data?.message || "User not found";
+      addToast(errMsg, "error");
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery("");
+    searchResults(null);
+    setSearchInitiated(false);
+  };
+
+  // Send Friend Request
+  const handleSendRequest = async (receiverId) => {
+    setActionLoading(true);
+    try {
+      const res = await API.post(`/friends/send-request/${receiverId}`);
+      setSentRequestIds((prev) => [...prev, receiverId]);
+
+      if (res.status === 200) {
+        addToast("Friend request accepted automatically!", "success");
+        fetchFriends();
+        fetchRequests();
+      } else {
+        addToast("Friend request sent successfully!", "success");
+      }
+    } catch (err) {
+      const errMsg = err.response?.data?.message || "Failed to send request";
+      addToast(errMsg, "error");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Accept Friend Request
+  const handleAcceptRequest = async (requestId, senderObj) => {
+    try {
+      await API.post(`/friends/accept-request/${requestId}`);
+      addToast(`You accepted ${senderObj?.name || "the"} friend request!`, "success");
+      setRequests((prev) => prev.filter((r) => r._id !== requestId));
+      if (senderObj) {
+        setFriends((prev) => {
+          if (prev.some((f) => f._id === senderObj._id)) return prev;
+          return [senderObj, ...prev];
+        });
+      } else {
+        fetchFriends();
+      }
+    } catch (err) {
+      const errMsg = err.response?.data?.message || "Failed to accept request";
+      addToast(errMsg, "error");
+      throw err;
+    }
+  };
+
+  // Reject Friend Request with Confirmation
+  const handleRejectRequest = (requestId, senderName) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Decline Friend Request?",
+      message: `Are you sure you want to decline the friend request from ${senderName || "this user"}?`,
+      type: "danger",
+      confirmText: "Decline Request",
+      onConfirm: async () => {
+        setActionLoading(true);
+        try {
+          await API.post(`/friends/reject-request/${requestId}`);
+          addToast("Friend request declined.", "info");
+          setRequests((prev) => prev.filter((r) => r._id !== requestId));
+        } catch (err) {
+          const errMsg = err.response?.data?.message || "Failed to decline request";
+          addToast(errMsg, "error");
+        } finally {
+          setActionLoading(false);
+          closeConfirmModal();
+        }
+      },
+      onCancel: () => closeConfirmModal(),
     });
-
-    return Array.from(names)
-      .filter(Boolean)
-      .map((name) => ({ id: name.toLowerCase(), name }));
-  }, [store.groups, user?.email, user?.name]);
-
-  const handleAddFriend = (e) => {
-    e.preventDefault();
-    const trimmed = friendName.trim();
-    if (!trimmed) return;
-
-    const next = loadSmartSplitterStore();
-    const exists = next.friends.some((f) => (f.name || "").toLowerCase() === trimmed.toLowerCase());
-    if (exists) return;
-
-    const friend = {
-      id: newId(),
-      name: trimmed,
-      createdAt: new Date().toISOString(),
-    };
-
-    const updated = { ...next, friends: [friend, ...next.friends] };
-    saveSmartSplitterStore(updated);
-    setStore(updated);
-    setFriendName("");
   };
+
+  // Unfriend logic with confirmation modal
+  const handleUnfriendClick = (friendObj) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Remove Friend?",
+      message: `Are you sure you want to unfriend ${friendObj.name}? This will remove them from your shared contacts.`,
+      type: "danger",
+      confirmText: "Unfriend",
+      onConfirm: async () => {
+        setActionLoading(true);
+        try {
+          await API.delete(`/friends/unfriend/${friendObj._id}`);
+          addToast(`${friendObj.name} has been removed from your friends list.`, "info");
+          // Remove from local array list state
+          setFriends((prev) => prev.filter((f) => f._id !== friendObj._id));
+        } catch (err) {
+          const errMsg = err.response?.data?.message || "Failed to unfriend user";
+          addToast(errMsg, "error");
+        } finally {
+          setActionLoading(false);
+          closeConfirmModal();
+        }
+      },
+      onCancel: () => closeConfirmModal(),
+    });
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+  };
+
+  // Derived search relationships
+  const searchRelation = useMemo(() => {
+    if (!searchResults) return null;
+    const searchId = searchResults._id;
+
+    const isFriend = friends.some((f) => f._id === searchId);
+    const isPendingReceived = requests.some((r) => r.sender?._id === searchId);
+    const isPendingSent = sentRequestIds.includes(searchId);
+
+    return {
+      isFriend,
+      isPendingReceived,
+      isPendingSent,
+    };
+  }, [searchResults, friends, requests, sentRequestIds]);
 
   return (
-    <div className="min-h-screen bg-[#0b0f1a] text-white">
-      {/* NAVBAR */}
-      <header className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#0d1120]/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
-          <button onClick={() => navigate("/")} className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500 text-white shadow-lg shadow-emerald-500/30">
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-4H9l3-6 3 6h-2v4z" />
-              </svg>
-            </div>
-            <span className="text-base font-semibold tracking-tight">
-              Smart<span className="text-emerald-400">Splitter</span>
-            </span>
-          </button>
+    <div
+      style={{ fontFamily: "'Plus Jakarta Sans', 'Inter', system-ui, sans-serif" }}
+      className="min-h-screen bg-[#f8fafc] text-slate-800 selection:bg-emerald-500/20 selection:text-emerald-700 overflow-x-hidden relative"
+    >
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[600px] pointer-events-none opacity-40 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-200 via-sky-100 to-transparent blur-[100px] z-0" />
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate("/dashboard")}
-              className="px-4 py-1.5 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-white/[0.07] transition-all"
-            >
-              Dashboard
-            </button>
-            <button
-              onClick={() => navigate("/friends")}
-              className="px-4 py-1.5 rounded-lg text-sm bg-white/[0.07] text-white transition-all"
-            >
-              Friends
-            </button>
+      <Navbar />
 
-            <div className="relative">
-              <button
-                onClick={() => setMenuOpen(!menuOpen)}
-                className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.05] pl-1 pr-3 py-1 hover:bg-white/[0.09] transition-all"
-              >
-                {user?.profilePhoto ? (
-                  <img src={user.profilePhoto} alt="profile" className="w-7 h-7 rounded-lg object-cover" />
-                ) : (
-                  <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-xs font-bold">
-                    {initials}
-                  </div>
-                )}
-                <span className="text-sm text-slate-300 max-w-[90px] truncate hidden sm:block">
-                  {user?.name || "Account"}
-                </span>
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  className={`w-3.5 h-3.5 text-slate-400 transition-transform ${menuOpen ? "rotate-180" : ""}`}
-                >
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
-
-              {menuOpen && (
-                <div className="absolute right-0 mt-2 w-44 rounded-xl border border-white/[0.08] bg-[#141928] shadow-2xl shadow-black/60 py-1.5 z-50">
-                  <button
-                    onClick={() => {
-                      navigate("/profile");
-                      setMenuOpen(false);
-                    }}
-                    className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:text-white hover:bg-white/[0.07] transition-all flex items-center gap-2.5"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4">
-                      <circle cx="12" cy="8" r="4" />
-                      <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
-                    </svg>
-                    Profile
-                  </button>
-                  <div className="my-1.5 border-t border-white/[0.06]" />
-                  <button
-                    onClick={() => {
-                      handleLogout();
-                      setMenuOpen(false);
-                    }}
-                    className="w-full text-left px-4 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/[0.08] transition-all flex items-center gap-2.5"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4">
-                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                      <polyline points="16 17 21 12 16 7" />
-                      <line x1="21" y1="12" x2="9" y2="12" />
-                    </svg>
-                    Logout
-                  </button>
-                </div>
-              )}
-            </div>
+      <main className="relative mx-auto max-w-6xl px-6 py-10 z-10">
+        {/* PAGE HEADER */}
+        <div className="mb-8">
+          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-50 px-3.5 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm mb-3">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            Connect & split together
           </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-6xl px-6 py-10">
-        <div className="flex items-start justify-between gap-6 flex-wrap mb-6">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3.5 py-1 text-xs font-medium text-emerald-400 mb-3">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Friends & contacts
-            </div>
-            <h1 className="text-3xl font-bold tracking-tight">Your people</h1>
-            <p className="text-slate-400 mt-2 max-w-xl leading-relaxed">
-              Add friends and quickly create a shared group to split expenses.
-            </p>
-          </div>
+          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-slate-900">
+            Friends
+          </h1>
+          <p className="text-slate-500 mt-2 max-w-xl leading-relaxed">
+            Search for people by email, manage pending requests, and keep track of your shared contacts.
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <section className="rounded-2xl border border-white/[0.08] bg-[#0d1120]/60 p-6 shadow-xl shadow-black/30">
-            <h2 className="text-lg font-semibold">Add a friend</h2>
-            <form onSubmit={handleAddFriend} className="mt-4 flex items-end gap-3 flex-wrap">
-              <div className="flex-1 min-w-[220px]">
-                <label className="text-sm text-slate-300">Name</label>
-                <input
-                  value={friendName}
-                  onChange={(e) => setFriendName(e.target.value)}
-                  placeholder="e.g. Rahul"
-                  className="mt-2 w-full rounded-xl border border-white/[0.10] bg-white/[0.05] px-4 py-2.5 text-sm outline-none focus:border-emerald-400/60"
-                />
-              </div>
-              <button
-                type="submit"
-                className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 transition-colors font-semibold text-sm"
-              >
-                Add
-              </button>
-            </form>
+        {/* SECTION 1: SEARCH FRIENDS */}
+        <section className="mb-10 p-6 rounded-2xl border border-slate-200/80 bg-white shadow-xl shadow-slate-200/30 relative overflow-hidden">
+          <h2 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+            <Search className="w-4.5 h-4.5 text-slate-400" />
+            Find Friends
+          </h2>
+          <div className="max-w-xl">
+            <SearchBar
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onSearch={handleSearch}
+              onClear={handleClearSearch}
+              loading={searchLoading}
+            />
+          </div>
 
-            <div className="mt-6">
-              <h3 className="text-sm font-semibold text-slate-300">Saved friends</h3>
-              {store.friends.length === 0 ? (
-                <p className="text-slate-400 mt-3">No friends added yet.</p>
-              ) : (
-                <div className="mt-3 space-y-3">
-                  {store.friends.map((f) => (
-                    <div key={f.id} className="flex items-center justify-between gap-3 border-b border-white/[0.06] pb-3">
-                      <div>
-                        <div className="font-medium">{f.name}</div>
-                        <div className="text-xs text-slate-400">
-                          Added {new Date(f.createdAt).toLocaleDateString()}
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => navigate(`/dashboard?createGroup=1&invite=${encodeURIComponent(f.name)}`)}
-                        className="px-4 py-2 rounded-xl border border-white/[0.10] bg-white/[0.04] hover:bg-white/[0.07] transition-colors text-sm font-semibold"
-                      >
-                        Create group
-                      </button>
+          {/* Search Result Card */}
+          {searchResults && (
+            <div className="mt-5 border-t border-slate-100 pt-5 animate-in fade-in slide-in-from-top-2 duration-200">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+                Search Results
+              </h3>
+              <div className="max-w-md rounded-2xl border border-slate-200/80 bg-slate-50/50 p-4 flex items-center justify-between gap-4 shadow-sm">
+                <div className="flex items-center gap-3 min-w-0">
+                  {searchResults.profilePhoto ? (
+                    <img
+                      src={searchResults.profilePhoto}
+                      alt={searchResults.name}
+                      className="w-11 h-11 rounded-full border border-slate-200 object-cover bg-white"
+                    />
+                  ) : (
+                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-indigo-400 to-purple-600 flex items-center justify-center font-bold text-xs text-white border border-indigo-200 shadow-inner">
+                      {searchResults.name
+                        ? searchResults.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
+                        : "S"}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-white/[0.08] bg-[#0d1120]/60 p-6 shadow-xl shadow-black/30">
-            <h2 className="text-lg font-semibold">From your groups</h2>
-            <p className="text-slate-400 mt-2">
-              Members you already split with will show up here for convenience.
-            </p>
-
-            {derivedFriendsFromGroups.length === 0 ? (
-              <p className="text-slate-400 mt-4">No group members yet. Create a group to populate this.</p>
-            ) : (
-              <div className="mt-4 space-y-3">
-                {derivedFriendsFromGroups.map((f) => (
-                  <div
-                    key={f.id}
-                    className="flex items-center justify-between gap-3 border-b border-white/[0.06] pb-3"
-                  >
-                    <div className="font-medium">{f.name}</div>
-                    <button
-                      onClick={() => navigate(`/dashboard?createGroup=1&invite=${encodeURIComponent(f.name)}`)}
-                      className="px-4 py-2 rounded-xl border border-white/[0.10] bg-white/[0.04] hover:bg-white/[0.07] transition-colors text-sm font-semibold"
-                    >
-                      Invite
-                    </button>
+                  )}
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-sm text-slate-800 truncate">
+                      {searchResults.name}
+                    </h4>
+                    <p className="text-xs text-slate-500 truncate mt-0.5">
+                      {searchResults.email}
+                    </p>
                   </div>
+                </div>
+
+                <div className="flex-shrink-0">
+                  {searchRelation?.isFriend ? (
+                    <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-emerald-500/20 bg-emerald-50 text-emerald-700 text-xs font-semibold">
+                      <UserCheck className="w-3.5 h-3.5" />
+                      Friend
+                    </span>
+                  ) : searchRelation?.isPendingReceived ? (
+                    <button
+                      onClick={() => {
+                        const request = requests.find((r) => r.sender?._id === searchResults._id);
+                        if (request) {
+                          handleAcceptRequest(request._id, searchResults);
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:opacity-95 text-white font-semibold text-xs shadow-md shadow-emerald-500/10 transition-colors flex items-center gap-1"
+                    >
+                      Accept Request
+                    </button>
+                  ) : searchRelation?.isPendingSent ? (
+                    <button
+                      disabled
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-100/50 text-slate-400 font-semibold text-xs cursor-not-allowed flex items-center gap-1"
+                    >
+                      Request Sent
+                    </button>
+                  ) : (
+                    <button
+                      disabled={actionLoading}
+                      onClick={() => handleSendRequest(searchResults._id)}
+                      className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:opacity-95 text-white font-semibold text-xs shadow-md shadow-emerald-500/10 transition-all flex items-center gap-1.5 h-9 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {actionLoading ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <>
+                          <UserPlus className="w-3.5 h-3.5" />
+                          Add Friend
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!searchLoading && searchInitiated && !searchResults && (
+            <p className="text-slate-400 text-sm mt-4">No user found matching that email query.</p>
+          )}
+        </section>
+
+        {/* TWO-COLUMN GRID LAYOUT */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          
+          {/* SECTION 2: PENDING FRIEND REQUESTS */}
+          <aside className="lg:col-span-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xl shadow-slate-200/30">
+            <h2 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <Mail className="w-4.5 h-4.5 text-indigo-500" />
+              Pending Requests
+              {requests.length > 0 && (
+                <span className="ml-1.5 px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold border border-indigo-200">
+                  {requests.length}
+                </span>
+              )}
+            </h2>
+
+            {requestsLoading ? (
+              <LoadingSkeleton variant="list" count={2} />
+            ) : requests.length === 0 ? (
+              <EmptyState
+                icon={Inbox}
+                title="No pending friend requests."
+                description="When someone sends you a request, it will appear here."
+              />
+            ) : (
+              <div className="space-y-3">
+                {requests.map((req) => (
+                  <PendingRequestCard
+                    key={req._id}
+                    request={req}
+                    onAccept={handleAcceptRequest}
+                    onReject={() => handleRejectRequest(req._id, req.sender?.name)}
+                  />
+                ))}
+              </div>
+            )}
+          </aside>
+
+          {/* SECTION 3: FRIENDS LIST */}
+          <section className="lg:col-span-8 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-xl shadow-slate-200/30">
+            <h2 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <Users className="w-4.5 h-4.5 text-emerald-500" />
+              Friends List
+              {friends.length > 0 && (
+                <span className="ml-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
+                  {friends.length}
+                </span>
+              )}
+            </h2>
+
+            {friendsLoading ? (
+              <LoadingSkeleton variant="card" count={4} />
+            ) : friends.length === 0 ? (
+              <EmptyState
+                icon={Users}
+                title="You haven't added any friends yet."
+                description="Search for users by email above to send your first friend request."
+              />
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {friends.map((friend) => (
+                  <FriendCard
+                    key={friend._id}
+                    friend={friend}
+                    onUnfriend={handleUnfriendClick}
+                  />
                 ))}
               </div>
             )}
           </section>
+
         </div>
       </main>
+
+      {/* DYNAMIC CONFIRMATION MODAL */}
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        type={confirmModal.type}
+        loading={actionLoading}
+        onConfirm={confirmModal.onConfirm}
+        onCancel={confirmModal.onCancel}
+        confirmText={confirmModal.confirmText}
+      />
+
+      {/* FLOATING TOASTS NOTIFICATIONS */}
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-3.5 max-w-sm w-full">
+        {toasts.map((toast) => (
+          <Toast
+            key={toast.id}
+            message={toast.message}
+            type={toast.type}
+            onClose={() => removeToast(toast.id)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
-

@@ -28,7 +28,6 @@ const searchUser = asyncHandler(async (req, res) => {
 
 const sendFriendRequest = asyncHandler(async (req, res) => {
   const sender = await User.findById(req.user._id);
-
   const { receiverId } = req.params;
 
   if (!receiverId) {
@@ -66,22 +65,20 @@ const sendFriendRequest = asyncHandler(async (req, res) => {
   });
 
   if (reverseRequest) {
-    reverseRequest.status = "accepted";
-    await reverseRequest.save();
+    // FIX: Match acceptFriendRequest logic by removing the document completely
+    await reverseRequest.deleteOne(); 
 
     sender.friends.push(receiver._id);
     receiver.friends.push(sender._id);
 
-    await sender.save();
-
-    await receiver.save();
+    await Promise.all([sender.save(), receiver.save()]);
 
     return res
       .status(200)
       .json(
         new ApiResponse(
           200,
-          reverseRequest,
+          null,
           "Friend request accepted automatically",
         ),
       );
@@ -114,68 +111,62 @@ const getPendingRequests = asyncHandler(async (req, res) => {
 });
 
 const acceptFriendRequest = asyncHandler(async (req, res) => {
-  const { requestId } = req.params;
+    const { requestId } = req.params;
 
-  if (!requestId) {
-    throw new ApiError(400, "Request ID is required");
-  }
+    if (!requestId) {
+        throw new ApiError(400, "Request ID is required");
+    }
 
-  // Find the friend request
-  const friendRequest = await FriendRequest.findById(requestId);
+    // Find the pending friend request
+    const friendRequest = await FriendRequest.findById(requestId);
 
-  if (!friendRequest) {
-    throw new ApiError(404, "Friend request not found");
-  }
+    if (!friendRequest) {
+        throw new ApiError(404, "Friend request not found");
+    }
 
-  // Only the receiver can accept the request
-  if (friendRequest.receiver.toString() !== req.user._id.toString()) {
-    throw new ApiError(
-      403,
-      "You are not authorized to accept this friend request"
+    // Only the receiver can accept the request
+    if (friendRequest.receiver.toString() !== req.user._id.toString()) {
+        throw new ApiError(
+            403,
+            "You are not authorized to accept this friend request"
+        );
+    }
+
+    // Fetch both users
+    const [sender, receiver] = await Promise.all([
+        User.findById(friendRequest.sender),
+        User.findById(friendRequest.receiver),
+    ]);
+
+    if (!sender || !receiver) {
+        throw new ApiError(404, "User not found");
+    }
+
+    // Add each other as friends (avoid duplicates)
+    if (!sender.friends.includes(receiver._id)) {
+        sender.friends.push(receiver._id);
+    }
+
+    if (!receiver.friends.includes(sender._id)) {
+        receiver.friends.push(sender._id);
+    }
+
+    // Save both users
+    await Promise.all([
+        sender.save(),
+        receiver.save(),
+    ]);
+
+    // Delete the pending friend request
+    await friendRequest.deleteOne();
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            null,
+            "Friend request accepted successfully"
+        )
     );
-  }
-
-  // Request should still be pending
-  if (friendRequest.status !== "pending") {
-    throw new ApiError(400, "Friend request has already been processed");
-  }
-
-  // Fetch both users
-  const [sender, receiver] = await Promise.all([
-    User.findById(friendRequest.sender),
-    User.findById(friendRequest.receiver),
-  ]);
-
-  if (!sender || !receiver) {
-    throw new ApiError(404, "User not found");
-  }
-
-  // Update request status
-  friendRequest.status = "accepted";
-
-  // Add friends (avoid duplicates)
-  if (!sender.friends.includes(receiver._id)) {
-    sender.friends.push(receiver._id);
-  }
-
-  if (!receiver.friends.includes(sender._id)) {
-    receiver.friends.push(sender._id);
-  }
-
-  // Save all changes together
-  await Promise.all([
-    sender.save(),
-    receiver.save(),
-    friendRequest.save(),
-  ]);
-
-  return res.status(200).json(
-    new ApiResponse(
-      200,
-      friendRequest,
-      "Friend request accepted successfully"
-    )
-  );
 });
 
 const rejectFriendRequest = asyncHandler(async (req, res) => {
@@ -190,7 +181,7 @@ const rejectFriendRequest = asyncHandler(async (req, res) => {
 
     if (!friendRequest) {
         throw new ApiError(404, "Friend request not found");
-    }   
+    }
 
     // Only the receiver can reject the request
     if (friendRequest.receiver.toString() !== req.user._id.toString()) {
@@ -200,19 +191,13 @@ const rejectFriendRequest = asyncHandler(async (req, res) => {
         );
     }
 
-    // Request should still be pending
-    if (friendRequest.status !== "pending") {
-        throw new ApiError(400, "Friend request has already been processed");
-    }
-
-    // Update request status
-    friendRequest.status = "rejected";
-    await friendRequest.save();
+    // Delete the pending request
+    await friendRequest.deleteOne();
 
     return res.status(200).json(
         new ApiResponse(
             200,
-            friendRequest,
+            null,
             "Friend request rejected successfully"
         )
     );
@@ -235,6 +220,59 @@ const getFriends = asyncHandler(async (req, res) => {
 
 });
 
+const unfriend = asyncHandler(async (req, res) => {
+    const { friendId } = req.params;
+
+    if (!friendId) {
+        throw new ApiError(400, "Friend ID is required");
+    }
+
+    const [user, friend] = await Promise.all([
+        User.findById(req.user._id),
+        User.findById(friendId),
+    ]);
+
+    if (!user || !friend) {
+        throw new ApiError(404, "User not found");
+    }
+
+    // Check if they are actually friends
+    if (!user.friends.some(id => id.toString() === friendId)) {
+        throw new ApiError(400, "User is not your friend");
+    }
+
+    // Remove friend from current user
+    user.friends = user.friends.filter(
+        id => id.toString() !== friendId
+    );
+
+    // Remove current user from friend's list
+    friend.friends = friend.friends.filter(
+        id => id.toString() !== req.user._id.toString()
+    );
+
+    // FIX: Clear out any historical or stray friend request documents in either direction
+    await FriendRequest.deleteMany({
+        $or: [
+            { sender: req.user._id, receiver: friendId },
+            { sender: friendId, receiver: req.user._id }
+        ]
+    });
+
+    await Promise.all([
+        user.save(),
+        friend.save()
+    ]);
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            null,
+            "Friend removed successfully"
+        )
+    );
+});
+
 export {
   searchUser,
   sendFriendRequest,
@@ -242,4 +280,5 @@ export {
   acceptFriendRequest,
   rejectFriendRequest,
   getFriends,
+  unfriend,
 };
